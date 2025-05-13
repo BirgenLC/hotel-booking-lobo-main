@@ -76,7 +76,7 @@ app.use((req, res, next) => {
       ) {
         next(); // allow access to public routes
       } else {
-        res.status(401).send("Unauthorized - 401");
+        res.status(401).render("401.ejs");
       }
     }
   } else {
@@ -94,31 +94,30 @@ app.use((req, res, next) => {
 
 // PUBLIC ROUTES
 app.get("/", (req, res) => {
-  if(req.session.user){
-    if(req.session.user.role =="superadmin"){
-      res.redirect("/dash/superadmin")
-    }elseif(req.session.user.role =="manager")
-      res.redirect("/dash/manager")
-    }else{
-      res.redirect("/dash/reception")
-    }else{
-  dbConnection.query("SELECT * FROM rooms", (roomsSelectError, rooms) => {
-    if (roomsSelectError) {
-      res.status(500).send("Server Error: 500");
+  if (req.session.user) {
+    if (req.session.user.role == "superadmin") {
+      res.redirect("/dash/superadmin");
+    } else if (req.session.user.role == "manager") {
+      res.redirect("/dash/manager");
     } else {
-      dbConnection.query("SELECT * FROM spots", (spotsSelectError, spots) => {
-        if (spotsSelectError) {
-          res.status(500).send("Server Error: 500");
-        } else {
-          res.render("index.ejs", { rooms, spots });
-        }
-      })
-    };
-    })
+      res.redirect("/dash/reception");
+    }
+  } else {
+    dbConnection.query("SELECT * FROM rooms", (roomsSelectError, rooms) => {
+      if (roomsSelectError) {
+        res.status(500).send("Server Error: 5001");
+      } else {
+        dbConnection.query("SELECT * FROM spots", (spotsSelectError, spots) => {
+          if (spotsSelectError) {
+            res.status(500).send("Server Error: 500");
+          } else {
+            res.render("index.ejs", { rooms, spots });
+          }
+        });
+      }
+    });
   }
-}
-);
-;
+});
 app.get("/login", (req, res) => {
   res.render("login.ejs");
 });
@@ -137,7 +136,7 @@ app.get("/book", (req, res) => {
       `SELECT * FROM rooms WHERE room_id=${req.query.id}`,
       (error, roomData) => {
         if (error) {
-          res.status(500).send("Server Error: 500");
+          res.status(500).render("500.ejs");
         } else {
           res.render("book.ejs", {
             image: roomData[0].image_url,
@@ -154,7 +153,7 @@ app.get("/book", (req, res) => {
       `SELECT * FROM spots WHERE spot_id= '${req.query.id}'`,
       (error, spotData) => {
         if (error) {
-          res.status(500).send("Server Error: 500");
+          res.status(500).render("500.ejs");
         } else {
           res.render("book.ejs", {
             image: spotData[0].image_url,
@@ -233,6 +232,7 @@ app.post("/client-info", (req, res) => {
 });
 
 app.post("/completeBooking", (req, res) => {
+  console.log(req.body);
   const { id, type, client, number, checkin } = req.body; // object destructuring
   if (type == "room") {
     // client_id INT,room INT,number_of_nights INT,checkin_date DATE,
@@ -243,7 +243,7 @@ app.post("/completeBooking", (req, res) => {
           res.status(500).render("500.ejs");
         } else {
           res.render("bookingsuccess.ejs", {
-            message: "Spot booked successfully",
+            message: "Room booked successfully",
           });
         }
       }
@@ -251,15 +251,14 @@ app.post("/completeBooking", (req, res) => {
   } else {
     //  client_id INT,spot VARCHAR(20),checkin_datetime DATETIME, meals VARCHAR(60), booking_status VARCHAR(50) DEFAULT 'pending', number_of_guests INT
     dbConnection.query(
-      `INSERT INTO spotBookings(spot, client_id, checkin_datetime, number_of_guests,meal) VALUES("${id}", ${client}, "${checkin}", ${number}, "all")`,
+      `INSERT INTO spotBookings(spot, client_id, checkin_datetime, number_of_guests,meals) VALUES("${id}", ${client}, "${checkin}", ${number}, "all")`,
       (error) => {
         if (error) {
-          console.log(error);
-          res
-            .status(500)
-            .json({ message: "Server Error: 500", success: false });
+          res.status(500).render("500.ejs");
         } else {
-          res.json({ message: "Spot booked successfully", success: true });
+          res.render("bookingsuccess.ejs", {
+            message: "Spot booked successfully",
+          });
         }
       }
     );
@@ -285,8 +284,32 @@ app.get("/addReceptionist", (req, res) => {
 // END OF MANAGER ROUTES
 // Receptionist Routes
 app.get("/dash/reception", (req, res) => {
-  res.render("reception/dash.ejs");
+  // get all the data from db
+  dbConnection.query(
+    "SELECT roombookings.booking_id as id,booking_status,room,number_of_nights,checkin_date,full_name,amount_paid FROM roombookings JOIN clients ON roombookings.client_id left join payments on roombookings.booking_id=payments.booking_id AND payment.booking_type ='room';",
+    (error, roombookings) => {
+      if (error) {
+        console.log(error);
+        return res.status(500).render("500.ejs");
+      }
+      dbConnection.query(
+        "SELECT spotbookings.booking_id as id, booking_status,spot,checkin_datetime,full_name,amount_paid FROM spotbookings JOIN clients ON spotbookings.client_id=clients.client_id left join payments on spotbookings.booking_id = payments.booking_id AND payment.booking_type ='spot';  ",
+        (error, spotbookings) => {
+          if (error) {
+            console.log(error);
+            return res.status(500).render("500.ejs");
+          }
+        }
+      );
+      res.render("reception/dash.ejs", {
+        spotbookings: spotbookings,
+        roombookings: roombookings,
+        totalCheckins: 5,
+      });
+    }
+  );
 });
+
 // end of receptionist routes
 // super admin routes
 app.get("/dash/superadmin", (req, res) => {
@@ -300,7 +323,7 @@ app.post("/login", (req, res) => {
     `SELECT * FROM users WHERE email="${email}"`,
     (error, userData) => {
       if (error) {
-        res.status(500).send("Server Error: 500");
+        res.status(500).render("500.ejs");
       } else {
         if (userData.length == 0) {
           res.status(401).send("User not found");
